@@ -1,0 +1,13 @@
+[project]
+name = "unify-post-training"
+version = "0.1.0"
+description = "State-distribution analysis tools for SFT, RL, and on-policy distillation experiments."
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

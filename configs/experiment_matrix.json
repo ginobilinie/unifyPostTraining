@@ -1,0 +1,39 @@
+{
+  "project": "unifyPostTraining",
+  "base_model": "to_be_selected",
+  "methods": [
+    {
+      "name": "sft",
+      "state_source": "expert_dataset",
+      "signal": "ground_truth_tokens",
+      "policy_type": "off_policy"
+    },
+    {
+      "name": "offline_kd",
+      "state_source": "teacher_rollouts",
+      "signal": "teacher_logits",
+      "policy_type": "off_policy"
+    },
+    {
+      "name": "opd",
+      "state_source": "student_rollouts",
+      "signal": "teacher_logits",
+      "policy_type": "on_policy"
+    },
+    {
+      "name": "rl",
+      "state_source": "current_policy_rollouts",
+      "signal": "reward",
+      "policy_type": "on_policy"
+    }
+  ],
+  "target_tasks": ["gsm8k", "math", "humaneval", "synthetic_instruction"],
+  "retention_tasks": ["mmlu", "gsm8k", "humaneval", "mbpp", "truthfulqa", "lm_perplexity"],
+  "state_drift_estimators": ["lexical_jaccard", "centroid_l2", "mmd_rbf", "sliced_wasserstein"],
+  "on_policy_ratio_sweep": [0, 0.25, 0.5, 0.75, 1.0],
+  "primary_plots": [
+    "state_drift_vs_forgetting",
+    "target_improvement_vs_retention",
+    "on_policy_ratio_vs_retention"
+  ]
+}
