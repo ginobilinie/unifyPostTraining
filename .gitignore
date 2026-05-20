@@ -8,3 +8,4 @@ data/*
 !data/.gitkeep
 reports/*
 !reports/.gitkeep
+outputs/

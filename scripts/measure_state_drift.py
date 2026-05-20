@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import random
 import sys
 from pathlib import Path
 
@@ -18,16 +19,29 @@ def main() -> None:
     parser.add_argument("--out", type=Path, required=True, help="Output JSON report.")
     parser.add_argument("--mmd-gamma", type=float, default=None)
     parser.add_argument("--wasserstein-projections", type=int, default=32)
+    parser.add_argument("--max-states", type=int, default=1000, help="Deterministically subsample each side for expensive drift metrics.")
+    parser.add_argument("--seed", type=int, default=13)
     args = parser.parse_args()
 
+    left = sample_states(read_states(args.left), args.max_states, args.seed)
+    right = sample_states(read_states(args.right), args.max_states, args.seed + 1)
     report = compute_drift_report(
-        read_states(args.left),
-        read_states(args.right),
+        left,
+        right,
         mmd_gamma=args.mmd_gamma,
         wasserstein_projections=args.wasserstein_projections,
+        seed=args.seed,
     )
     write_json(args.out, report.to_json())
     print(f"Wrote {args.out}")
+
+
+def sample_states(states: list, max_states: int, seed: int) -> list:
+    if max_states <= 0 or len(states) <= max_states:
+        return states
+    rng = random.Random(seed)
+    indices = sorted(rng.sample(range(len(states)), max_states))
+    return [states[index] for index in indices]
 
 
 if __name__ == "__main__":

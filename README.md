@@ -98,3 +98,128 @@ The intended progression is:
 This repo currently provides the measurement and orchestration layer. Model
 training adapters should be added once the target base model and training stack
 are fixed.
+
+## Phase 1: Qwen2.5-0.5B-Instruct SFT Validation
+
+This is the first executable test of the state-distribution hypothesis:
+
+1. Evaluate the base model on GSM8K.
+2. SFT the base model with TRL/PEFT LoRA by default.
+3. Evaluate the SFT adapter.
+4. Collect base and SFT rollout states on the same prompts.
+5. Measure state drift.
+6. Write one report containing forgetting and drift.
+
+Run a small but useful first pass:
+
+```bash
+MODEL_PATH=/data/dong/explore/hf_models/Qwen2.5-0.5B-Instruct \
+PYTHON_BIN=/home/dong/anaconda3/envs/qwen_sft/bin/python \
+TRAINER=trl \
+TRAIN_LIMIT=1000 \
+EVAL_LIMIT=200 \
+ROLLOUT_LIMIT=100 \
+bash scripts/run_phase1_validation.sh
+```
+
+Run a stronger SFT stress test intended to create more state drift and expose
+possible retention loss:
+
+```bash
+MODEL_PATH=/data/dong/explore/hf_models/Qwen2.5-0.5B-Instruct \
+PYTHON_BIN=/home/dong/anaconda3/envs/qwen_sft/bin/python \
+TRAINER=trl \
+OUT_ROOT=outputs/phase1_qwen2_5_0_5b_strong_sft \
+REPORT_ROOT=reports/phase1_qwen2_5_0_5b_strong_sft \
+TRAIN_LIMIT=7473 \
+EVAL_LIMIT=500 \
+GSM8K_EVAL_BATCH_SIZE=8 \
+GSM8K_MAX_NEW_TOKENS=192 \
+RETENTION_LIMIT=200 \
+MMLU_LIMIT=500 \
+ROLLOUT_LIMIT=200 \
+EPOCHS=5 \
+BATCH_SIZE=8 \
+GRAD_ACCUM=2 \
+LR=5e-4 \
+LORA_RANK=32 \
+LORA_ALPHA=64 \
+bash scripts/run_phase1_validation.sh
+```
+
+For follow-up runs on the same base model and same eval limits, skip the base
+evals and base rollout collection by reusing an existing report directory:
+
+```bash
+MODEL_PATH=/data/dong/explore/hf_models/Qwen3-0.6B-Base \
+PYTHON_BIN=/home/dong/anaconda3/envs/qwen_sft/bin/python \
+TRAINER=trl \
+REUSE_BASE=1 \
+BASE_REPORT_ROOT=reports/phase1_qwen3_0_6b_base_strong_sft \
+OUT_ROOT=outputs/phase1_qwen3_0_6b_base_medium_sft \
+REPORT_ROOT=reports/phase1_qwen3_0_6b_base_medium_sft \
+TRAIN_LIMIT=7473 \
+EVAL_LIMIT=500 \
+GSM8K_EVAL_BATCH_SIZE=8 \
+GSM8K_MAX_NEW_TOKENS=192 \
+RETENTION_LIMIT=200 \
+MMLU_LIMIT=500 \
+ROLLOUT_LIMIT=200 \
+EPOCHS=2 \
+BATCH_SIZE=8 \
+GRAD_ACCUM=2 \
+LR=2e-4 \
+LORA_RANK=32 \
+LORA_ALPHA=64 \
+bash scripts/run_phase1_validation.sh
+```
+
+For base models such as `Qwen3-0.6B-Base`, prefer plain causal-LM formatting
+instead of chat templates:
+
+```bash
+MODEL_PATH=/data/dong/explore/hf_models/Qwen3-0.6B-Base \
+PYTHON_BIN=/home/dong/anaconda3/envs/qwen_sft/bin/python \
+TRAINER=trl \
+PROMPT_FORMAT=plain \
+OUT_ROOT=outputs/phase1_qwen3_0_6b_base_plain_medium_sft \
+REPORT_ROOT=reports/phase1_qwen3_0_6b_base_plain_medium_sft \
+TRAIN_LIMIT=7473 \
+EVAL_LIMIT=500 \
+GSM8K_EVAL_BATCH_SIZE=8 \
+GSM8K_MAX_NEW_TOKENS=192 \
+RETENTION_LIMIT=200 \
+MMLU_LIMIT=500 \
+ROLLOUT_LIMIT=200 \
+EPOCHS=2 \
+BATCH_SIZE=8 \
+GRAD_ACCUM=2 \
+LR=2e-4 \
+LORA_RANK=32 \
+LORA_ALPHA=64 \
+bash scripts/run_phase1_validation.sh
+```
+
+For a quick smoke test:
+
+```bash
+PYTHON_BIN=/home/dong/anaconda3/envs/qwen_sft/bin/python \
+TRAINER=trl \
+TRAIN_LIMIT=8 \
+EVAL_LIMIT=4 \
+ROLLOUT_LIMIT=4 \
+EPOCHS=1 \
+bash scripts/run_phase1_validation.sh
+```
+
+Main outputs:
+
+- `outputs/phase1_qwen2_5_0_5b/sft_lora/adapter.pt`
+- `reports/phase1_qwen2_5_0_5b/base_eval/metrics.json`
+- `reports/phase1_qwen2_5_0_5b/sft_eval/metrics.json`
+- `reports/phase1_qwen2_5_0_5b/state_drift.json`
+- `reports/phase1_qwen2_5_0_5b/phase1_report.json`
+
+The current RL placeholder is `scripts/run_verl_rl_placeholder.py`. Use `verl`
+for the RL phase after SFT/KD/OPD validation is stable on this same report
+schema.

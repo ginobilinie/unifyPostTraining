@@ -1,0 +1,331 @@
+\documentclass{article}
+
+\PassOptionsToPackage{numbers,compress}{natbib}
+\usepackage{neurips_2026}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsfonts}
+\usepackage{nicefrac}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{amssymb}
+\usepackage{enumitem}
+
+\title{Post-Training is About States, Not Tokens:\\
+A State Distribution View of SFT, RL, and On-Policy Distillation}
+
+\author{%
+  Anonymous Authors\\
+  Affiliation\\
+  Address\\
+  \texttt{email} \\
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Large language model post-training methods such as supervised fine-tuning (SFT),
+reinforcement learning (RL), and distillation are often analyzed through their
+loss functions: maximum likelihood, policy gradients, forward KL, reverse KL, or
+related objective-level variants. We study a complementary factor: the
+\emph{state distribution} on which supervision is applied. For an autoregressive
+policy, a state is a prompt plus generated prefix. SFT trains on fixed dataset
+states, while RL and on-policy distillation (OPD) train on states induced by the
+current learner.
+
+We formalize post-training as state-distribution shaping and run a controlled
+small-scale study using Qwen3-0.6B-Base on GSM8K, with TruthfulQA and MMLU as
+retention evaluations. Our results show three phenomena. First, a mild SFT run
+improves GSM8K with little forgetting, while a stress SFT run causes substantial
+retention loss. Second, OPD from a degraded SFT teacher surpasses that teacher
+on GSM8K, TruthfulQA, and MMLU, despite using the teacher as its only
+supervision source. Third, a lightweight on-policy RL run improves GSM8K while
+preserving retention. These results support a state-centric view of
+post-training: the source and locality of training states can be as important as
+the form of the supervision signal.
+\end{abstract}
+
+\section{Introduction}
+
+Post-training is central to modern language model development. Supervised
+fine-tuning teaches models to imitate demonstrations, reinforcement learning
+optimizes model generations against rewards, and distillation transfers behavior
+from a teacher to a student. These methods are usually compared by their
+objectives: maximum likelihood for SFT, reward maximization for RL, and
+token-level divergences for distillation.
+
+This view is useful, but incomplete. In autoregressive generation, each update is
+not merely a token-level update. It is an update at a \emph{state}: the prompt
+and the prefix that the model has already generated. The distribution over these
+states determines which parts of the policy are touched during training. SFT
+updates the model on dataset prefixes, which need not be states the current
+policy would visit. RL updates the model on states sampled from the current
+policy. OPD occupies a middle position: the teacher provides the signal, but the
+student determines the states.
+
+We investigate the following thesis:
+\begin{quote}
+Post-training behavior is governed by the interaction between supervision signal
+and training state distribution; on-policy state supervision can preserve
+locality and allow students to improve beyond degraded teachers.
+\end{quote}
+
+We make three contributions:
+\begin{enumerate}[leftmargin=*]
+    \item We formulate SFT, RL, and OPD under a common state-distribution view of
+    autoregressive post-training.
+    \item We implement a controlled single-GPU experimental pipeline measuring
+    target accuracy, retention, forgetting, and rollout-state drift.
+    \item We provide evidence that OPD can outperform a degraded SFT teacher and
+    that on-policy RL improves target performance with little retention loss.
+\end{enumerate}
+
+\section{State Distribution View}
+
+\subsection{Autoregressive States}
+
+An autoregressive language model defines a policy
+\begin{equation}
+    \pi_\theta(y_t \mid x, y_{<t}).
+\end{equation}
+We call
+\begin{equation}
+    s_t = (x, y_{<t})
+\end{equation}
+the \emph{state}. The next token $y_t$ is the action, and a generated answer is a
+trajectory through states. Let $d^\pi(s)$ denote the state visitation
+distribution induced by policy $\pi$ on a prompt distribution.
+
+\subsection{SFT: Off-Policy State Fitting}
+
+SFT minimizes token loss on dataset states:
+\begin{equation}
+    \mathcal{L}_{\mathrm{SFT}}(\theta)
+    =
+    -\mathbb{E}_{s \sim d_{\mathrm{data}}}
+    \log \pi_\theta(y^\star \mid s).
+\end{equation}
+The supervision is dense, but the states are off-policy. If dataset trajectories
+are far from the model's own rollouts, updates may affect behavior in regions
+that the model cannot reliably reach or recover from. This is the familiar
+exposure-bias problem recast as a state-distribution mismatch.
+
+\subsection{RL: On-Policy Local Improvement}
+
+RL samples trajectories from the current policy and updates the model using
+rewards:
+\begin{equation}
+    \max_\theta \mathbb{E}_{s \sim d^{\pi_\theta}, y \sim \pi_\theta(\cdot|s)}
+    [r(s,y)].
+\end{equation}
+The reward may be sparse, but the states are on-policy. This makes RL a local
+improvement procedure: it modifies behavior where the current model actually
+visits.
+
+\subsection{OPD: Teacher-Guided On-Policy Learning}
+
+In OPD, the student samples states and the teacher provides supervision:
+\begin{equation}
+    \mathcal{L}_{\mathrm{OPD}}(\theta)
+    =
+    \mathbb{E}_{s \sim d^{\pi_S}}
+    \left[
+    D(\pi_T(\cdot|s) \,\|\, \pi_S(\cdot|s))
+    \right].
+\end{equation}
+In our strongest OPD variant, the teacher generates short continuations from
+student states and the student learns those continuations with cross entropy.
+This is analogous to DAgger-style learning: the learner controls the state
+distribution, while an expert-like source provides local repair signals
+\citep{ross2011dagger}.
+
+\section{Unified Framework}
+
+We view post-training as repeatedly transforming a model's state distribution:
+\begin{equation}
+    d_{k+1}(s) = \mathcal{T}\big(d_k(s), \mathrm{signal}\big).
+\end{equation}
+Different algorithms vary both in the source of states and the source of signal.
+
+\begin{table}[t]
+\centering
+\caption{State-source view of common post-training methods.}
+\label{tab:framework}
+\begin{tabular}{lll}
+\toprule
+Method & Training state source & Supervision signal \\
+\midrule
+SFT & Dataset trajectories & Gold tokens \\
+Offline KD & Teacher trajectories & Teacher logits/tokens \\
+OPD & Student trajectories & Teacher logits/continuations \\
+RL & Current policy trajectories & Reward \\
+DAgger & Learner trajectories & Expert actions \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+This view predicts that methods using learner-induced states can behave
+differently from off-policy imitation even when the supervision source is similar
+or weaker. In particular, a student can outperform its teacher if the teacher's
+errors are coupled to the teacher's own state distribution rather than fully
+encoded in its local responses on the student's states.
+
+\section{Experimental Setup}
+
+\paragraph{Model and hardware.}
+All experiments use Qwen3-0.6B-Base with LoRA adapters on a single RTX 3090
+24GB GPU. We use plain GSM8K-style prompts rather than chat templates because
+the model is a base model.
+
+\paragraph{Target and retention tasks.}
+The target task is GSM8K. Retention is measured with TruthfulQA multiple-choice
+and a selected MMLU subset. Base model scores are GSM8K 0.448, TruthfulQA 0.300,
+and MMLU 0.436.
+
+\paragraph{Methods.}
+We evaluate mild SFT, stress SFT, OPD variants, and lightweight on-policy RL. The
+mild SFT run uses GSM8K SFT data and produces a non-degraded teacher. The stress
+SFT run uses five epochs, learning rate $5\times10^{-4}$, LoRA rank 64, and LoRA
+alpha 128, intentionally probing forgetting. OPD samples student states and
+trains from teacher continuations. RL uses group-relative exact-answer reward on
+GSM8K rollouts.
+
+\paragraph{Metrics.}
+For a retention task, forgetting is
+\begin{equation}
+    F = \mathrm{Score}_{\mathrm{base}} - \mathrm{Score}_{\mathrm{post}}.
+\end{equation}
+Retention ratio is $\mathrm{Score}_{\mathrm{post}} /
+\mathrm{Score}_{\mathrm{base}}$. We report mean forgetting and mean retention
+over TruthfulQA and MMLU.
+
+\paragraph{State drift.}
+For each trained model, we sample rollouts on a fixed prompt set and collect
+prefix states $s_t=(x,y_{<t})$. We embed states with a lightweight lexical
+feature representation and report maximum mean discrepancy (MMD) with an RBF
+kernel. We also compute centroid distance, sliced Wasserstein distance, and
+lexical Jaccard distance, but use MMD as the primary scalar drift measure.
+
+\section{Results}
+
+\subsection{SFT Can Be Gentle or Destructive}
+
+\begin{table}[t]
+\centering
+\caption{Main results. GSM8K is the target task; TruthfulQA and MMLU are
+retention tasks. Forgetting and retention are averaged over TruthfulQA and
+MMLU.}
+\label{tab:main-results}
+\begin{tabular}{lrrrrrr}
+\toprule
+Run & GSM8K & TruthfulQA & MMLU & MMD & Forgetting & Retention \\
+\midrule
+Base & 0.448 & 0.300 & 0.436 & -- & -- & -- \\
+Mild SFT & 0.512 & 0.295 & 0.444 & 0.00956 & -0.0015 & 1.0008 \\
+Stress SFT & 0.420 & 0.245 & 0.364 & 0.01093 & 0.0635 & 0.8258 \\
+OPD from mild SFT & 0.512 & 0.290 & 0.434 & 0.01470 & 0.0060 & 0.9810 \\
+OPD from stress SFT & 0.466 & 0.275 & 0.430 & 0.01092 & 0.0155 & 0.9515 \\
+On-policy RL & 0.472 & 0.290 & 0.442 & 0.01098 & 0.0020 & 0.9902 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Mild SFT improves GSM8K from 0.448 to 0.512 with essentially no retention loss.
+This is an important negative control: SFT does not necessarily forget in our
+setup. However, stress SFT produces substantial retention degradation:
+TruthfulQA falls from 0.300 to 0.245 and MMLU falls from 0.436 to 0.364. Its
+mean retention ratio is 0.8258. Interestingly, stress SFT also reduces GSM8K to
+0.420, indicating that overly aggressive off-policy training can degrade both
+general and target behavior.
+
+\subsection{OPD Can Surpass a Degraded Teacher}
+
+The clearest OPD result uses the stress SFT model as the teacher. The teacher is
+degraded: GSM8K 0.420, TruthfulQA 0.245, MMLU 0.364. OPD from this teacher
+achieves GSM8K 0.466, TruthfulQA 0.275, and MMLU 0.430. Thus the student
+surpasses its teacher on all measured tasks despite using that teacher as its
+supervision source.
+
+This supports the claim that teacher behavior is not transferred as a single
+global object. The student receives local guidance on states sampled from the
+student's own policy. When those states differ from the teacher's problematic
+trajectory distribution, the student can avoid inheriting some teacher failures.
+
+\subsection{RL Provides the On-Policy Reward Point}
+
+The lightweight RL run improves GSM8K from 0.448 to 0.472 while retaining
+TruthfulQA 0.290 and MMLU 0.442. Its mean forgetting is only 0.0020. This is
+consistent with the view that RL behaves as an on-policy local improvement
+method: it changes behavior where the policy samples states and does not require
+large off-policy movement.
+
+\subsection{Drift Magnitude Is Not the Whole Story}
+
+Our initial hypothesis was that scalar state drift would strongly explain
+forgetting. The data suggest a more nuanced conclusion. Stress SFT and OPD from
+the stress teacher have nearly identical MMD drift, 0.01093 and 0.01092, but very
+different retention ratios, 0.8258 and 0.9515. Similarly, RL has comparable MMD
+drift, 0.01098, with much smaller forgetting.
+
+Therefore, the evidence does not support a simple scalar law of the form
+``larger MMD implies more forgetting'' in this small setup. Instead, it supports
+a state-source claim: the \emph{quality, locality, and learner-dependence} of
+training states matter. Measuring only the distance between rollout
+distributions can miss whether updates were applied on states that are locally
+recoverable for the learner.
+
+\section{Discussion}
+
+\paragraph{Objective-level analysis is incomplete.}
+The contrast between stress SFT and OPD from the stress teacher is difficult to
+explain using only the source of supervision. Both are ultimately shaped by the
+same degraded teacher/data behavior, but OPD applies supervision on states
+sampled from the student. This changes the learning problem.
+
+\paragraph{On-policy dense shaping.}
+The successful OPD variant used teacher continuations rather than one-step
+logit matching. One-step OPD collapsed badly in our runs, reaching GSM8K 0.040.
+Continuation-based OPD recovered target performance. This suggests a practical
+recipe: combine on-policy sampling with dense, trajectory-level local
+supervision.
+
+\paragraph{Limitations.}
+This study is small-scale: one base model, one target dataset, LoRA adapters,
+limited retention tasks, and lightweight drift estimators. The RL trainer is a
+minimal on-policy GRPO-style implementation rather than a full-scale verl PPO or
+GRPO setup. Our drift metric uses lexical features rather than hidden-state or
+encoder embeddings. The results should therefore be read as evidence for a
+mechanistic hypothesis, not as a benchmark claim.
+
+\section{Related Work}
+
+Our view connects imitation learning and dataset aggregation
+\citep{ross2011dagger}, reinforcement learning from human or verifiable feedback
+\citep{ziegler2019fine,ouyang2022training,rafailov2023direct}, and knowledge
+distillation \citep{hinton2015distilling}. It also relates to analyses of
+exposure bias in sequence models \citep{bengio2015scheduled} and catastrophic
+forgetting \citep{kirkpatrick2017overcoming}. We differ by using a single
+state-distribution lens to compare SFT, RL, and OPD.
+
+\section{Conclusion}
+
+We proposed a state-distribution view of post-training. In this view, SFT is
+off-policy state fitting, RL is on-policy reward-guided improvement, and OPD is
+teacher-guided on-policy learning. Our experiments show that OPD can surpass a
+degraded SFT teacher and that on-policy RL improves a target task with little
+retention loss. The evidence refines the original thesis: post-training is not
+only about token objectives or scalar distribution drift; it is about where
+supervision is applied in the model's state space.
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\end{document}
