@@ -307,13 +307,59 @@ mechanistic hypothesis, not as a benchmark claim.
 
 \section{Related Work}
 
-Our view connects imitation learning and dataset aggregation
-\citep{ross2011dagger}, reinforcement learning from human or verifiable feedback
-\citep{ziegler2019fine,ouyang2022training,rafailov2023direct}, and knowledge
-distillation \citep{hinton2015distilling}. It also relates to analyses of
-exposure bias in sequence models \citep{bengio2015scheduled} and catastrophic
-forgetting \citep{kirkpatrick2017overcoming}. We differ by using a single
-state-distribution lens to compare SFT, RL, and OPD.
+\paragraph{Post-training objectives.}
+Language model post-training is commonly described through the optimization
+objective being used. SFT is typically framed as maximum-likelihood learning on
+instruction demonstrations. RLHF and related approaches optimize model samples
+against learned or verifiable rewards \citep{ziegler2019fine,ouyang2022training}.
+Preference-optimization methods such as DPO remove the explicit online RL loop
+and express preference learning as a supervised objective
+\citep{rafailov2023direct}. This objective-centric view has clarified many
+algorithmic trade-offs, but it can obscure the role of the state distribution on
+which the objective is applied. Our work keeps the objective visible, but treats
+the training state source as a separate axis.
+
+\paragraph{Exposure bias and imitation learning.}
+The distinction between dataset states and learner-induced states has a long
+history in imitation learning. Behavioral cloning trains on expert trajectories
+and can suffer from compounding errors when the learner visits states absent
+from the demonstrations. DAgger addresses this by collecting learner-induced
+states and querying an expert on those states \citep{ross2011dagger}. Exposure
+bias in sequence prediction captures a related mismatch between training on
+gold prefixes and testing on model-generated prefixes
+\citep{bengio2015scheduled}. We adapt this perspective to LLM post-training:
+SFT resembles behavioral cloning on fixed trajectories, whereas RL and OPD apply
+signals on states induced by the current learner.
+
+\paragraph{Knowledge distillation.}
+Knowledge distillation transfers behavior from a teacher to a student through
+soft targets, logits, or generated data \citep{hinton2015distilling}. In
+language models, distillation is often analyzed by the divergence being
+optimized or by the quality of teacher outputs. Our OPD experiments isolate a
+different factor: the teacher may provide the signal, but the student can
+control the state distribution. This explains why a student need not inherit all
+failures of a degraded teacher, especially when teacher supervision is queried
+on student states rather than copied from teacher trajectories.
+
+\paragraph{Catastrophic forgetting and retention.}
+Catastrophic forgetting has been studied in continual learning as the loss of
+previous capabilities when training on new tasks \citep{kirkpatrick2017overcoming}.
+In LLM post-training, forgetting is often measured as degradation on broad
+retention tasks after specialization. Our experiments follow this empirical
+tradition by measuring TruthfulQA and MMLU after GSM8K post-training. The
+results suggest that forgetting is not only a matter of update magnitude or
+dataset size: aggressive off-policy SFT can damage retention, while on-policy RL
+and OPD can preserve more capability under comparable target-task pressure.
+
+\paragraph{State drift measurement.}
+Distribution shift is often quantified using embedding distances, classifier
+two-sample tests, MMD, or Wasserstein-style metrics. We use rollout-state MMD as
+a compact proxy for state drift, while also tracking other lexical distribution
+statistics. Our results show both the value and limits of such scalar measures:
+stress SFT and OPD from the stress teacher have nearly identical MMD drift, but
+very different retention. This motivates richer state-distribution analyses that
+consider not only how far model rollouts move, but which training states receive
+supervision and whether they are locally reachable by the learner.
 
 \section{Conclusion}
 
