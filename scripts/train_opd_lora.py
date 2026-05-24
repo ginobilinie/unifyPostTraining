@@ -33,6 +33,7 @@ def main() -> None:
     parser.add_argument("--rollout-max-new-tokens", type=int, default=96)
     parser.add_argument("--state-stride", type=int, default=8)
     parser.add_argument("--max-state-length", type=int, default=1024)
+    parser.add_argument("--state-source", choices=["student", "teacher"], default="student")
     parser.add_argument("--objective", choices=["next_token_kl", "teacher_continuation_ce"], default="teacher_continuation_ce")
     parser.add_argument("--teacher-continuation-max-new-tokens", type=int, default=64)
     parser.add_argument("--teacher-temperature", type=float, default=0.0)
@@ -88,7 +89,8 @@ def main() -> None:
 
     for update in range(1, args.updates + 1):
         batch_prompts = [prompts[rng.randrange(len(prompts))] for _ in range(args.prompts_per_update)]
-        state_ids = collect_on_policy_states(student, tokenizer, device, batch_prompts, args)
+        rollout_policy = student if args.state_source == "student" else teacher
+        state_ids = collect_on_policy_states(rollout_policy, tokenizer, device, batch_prompts, args)
         if len(state_ids) > args.max_states_per_update:
             state_ids = [state_ids[index] for index in sorted(rng.sample(range(len(state_ids)), args.max_states_per_update))]
         if not state_ids:
@@ -147,6 +149,7 @@ def main() -> None:
         "rollout_max_new_tokens": args.rollout_max_new_tokens,
         "state_stride": args.state_stride,
         "max_state_length": args.max_state_length,
+        "state_source": args.state_source,
         "objective": args.objective,
         "teacher_continuation_max_new_tokens": args.teacher_continuation_max_new_tokens,
         "teacher_temperature": args.teacher_temperature,
